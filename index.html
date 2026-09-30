@@ -228,6 +228,11 @@
   .chbtn{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:6px;width:24px;height:27px;font-size:12px;flex:0 0 auto;padding:0}
   .chbtn:hover{color:var(--txt);border-color:var(--muted)}
   .chbtn.del:hover{color:#f2513c;border-color:#f2513c}
+.chbtn.leave{width:auto;padding:0 8px}
+.chbtn.leave:hover{color:#f2513c;border-color:#f2513c}
+.chbtn.rejoin{width:auto;padding:0 8px;color:var(--accent)}
+.memrow.left .meminput{opacity:.55;text-decoration:line-through}
+.memleft{font-size:11px;color:var(--muted);flex:0 0 auto}
   .chbtn:disabled{opacity:.3;cursor:default}
   .chbtn:disabled:hover{color:var(--muted);border-color:var(--line)}
   .chbtn.secbtn{width:auto;padding:0 7px;color:var(--accent)}
@@ -372,7 +377,7 @@
       <div class="secttl">스터디원 관리</div>
       <div class="memrows" id="memRows"></div>
       <button class="btn ghost sm" id="memAdd" style="margin-top:10px">+ 스터디원 추가</button>
-      <div class="callhint"><b>↑ ↓</b> 버튼으로 순서를 바꿀 수 있어요. 일정마다 <b>질문 순서 뽑기</b>를 누르면 그 순서대로 <b>앞사람이 뒷사람에게 질문</b>하는 순환 구조로 배정됩니다. 2명 이상 등록해야 질문 배정을 만들 수 있어요.</div>
+      <div class="callhint"><b>↑ ↓</b> 버튼으로 순서를 바꿀 수 있어요. 일정마다 <b>질문 순서 뽑기</b>를 누르면 그 순서대로 <b>앞사람이 뒷사람에게 질문</b>하는 순환 구조로 배정됩니다. 2명 이상 등록해야 질문 배정을 만들 수 있어요. 그만두는 스터디원은 <b>탈퇴</b>를 누르면 지난 기록은 남기고 새 질문 배정에서만 빠져요(<b>복귀</b>로 되돌릴 수 있어요).</div>
     </div>
 
     <div class="panel adminOnly">
@@ -563,7 +568,9 @@ function chapNames(b){
 
 /* ---------- 스터디원 / 질문 배정 ---------- */
 const members=()=>state.members||(state.members=[]);
-const memberName=id=>{const m=members().find(x=>x.id===id);return m?(m.name||"(이름없음)"):"(삭제됨)";};
+const memberName=id=>{const m=members().find(x=>x.id===id);return m?(m.name||"(이름없음)")+(m.left?" (탈퇴)":""):"(삭제됨)";};
+/* 활동 중인 스터디원 = 이름이 있고 탈퇴하지 않은 사람. 새 질문 배정·불참 선택은 이 사람들만 대상 */
+const activeMembers=()=>members().filter(m=>(m.name||"").trim()&&!m.left);
 const memberGone=id=>!members().some(m=>m.id===id);        // 삭제된 스터디원인지
 const qaOrphan=x=>memberGone(x.q)&&memberGone(x.a);        // 질문자·답변자 둘 다 삭제됨 → 표시 불필요
 /* 이 사람이 이 일정에서 불참인가. 불참자는 자기 역할(질문자/답변자)만 비활성화되고 상대는 유지 */
@@ -679,7 +686,7 @@ function pickBest(cands,h,currentQa){
   return {qa:pick.qa, repeats:pick.rep, options};
 }
 function buildQA(from,to,subject,excludeId,currentQa,drawNo,mode){
-  const ids=members().filter(m=>(m.name||"").trim()).map(m=>m.id);
+  const ids=activeMembers().map(m=>m.id);
   if(ids.length<2)return null;
   const units=chapUnits(subject,from,to);
   if(!units.length)return null;
@@ -885,12 +892,17 @@ function renderMembers(){
   const el=document.getElementById("memRows");
   const ms=members();
   el.innerHTML = ms.length
-    ? ms.map((m,i)=>`<div class="memrow">
+    ? ms.map((m,i)=>`<div class="memrow${m.left?" left":""}">
         <span class="memnum">${i+1}</span>
         <input class="meminput" value="${escAttr(m.name||"")}" data-i="${i}" placeholder="이름">
+        ${m.left?`<span class="memleft">탈퇴</span>`:""}
         <button class="chbtn up" data-i="${i}" title="위로" ${i===0?"disabled":""}>↑</button>
         <button class="chbtn down" data-i="${i}" title="아래로" ${i===ms.length-1?"disabled":""}>↓</button>
-        <button class="chbtn del" data-i="${i}" title="삭제">✕</button>
+        ${!(m.name||"").trim()
+          ? `<button class="chbtn del" data-i="${i}" title="삭제">✕</button>`   /* 이름 없는 빈 줄만 완전 삭제 */
+          : m.left
+            ? `<button class="chbtn rejoin" data-i="${i}" title="다시 활동">복귀</button>`
+            : `<button class="chbtn leave" data-i="${i}" title="탈퇴 처리">탈퇴</button>`}
       </div>`).join("")
     : `<div class="muted" style="font-size:13px">아직 등록된 스터디원이 없어요.</div>`;
   el.querySelectorAll(".meminput").forEach(inp=>{
@@ -901,6 +913,18 @@ function renderMembers(){
   el.querySelectorAll(".chbtn.down").forEach(b=>b.onclick=()=>moveMember(+b.dataset.i,1));
   el.querySelectorAll(".chbtn.del").forEach(b=>b.onclick=()=>{
     ms.splice(+b.dataset.i,1); saveState(); renderMembers();
+  });
+  /* 탈퇴: 지우지 않고 표시만 바꾼다 → 지난 질문 기록은 그대로, 새 배정에서만 빠짐 */
+  el.querySelectorAll(".chbtn.leave").forEach(b=>b.onclick=()=>{
+    const m=ms[+b.dataset.i];
+    if(!confirm(`${m.name} 님을 탈퇴 처리할까요?\n\n지난 질문 기록은 그대로 남고, 앞으로 뽑는 질문 순서에서만 빠져요.`))return;
+    m.left=true; m.leftAt=new Date().toISOString().slice(0,10);
+    saveState(); render();
+  });
+  el.querySelectorAll(".chbtn.rejoin").forEach(b=>b.onclick=()=>{
+    const m=ms[+b.dataset.i];
+    delete m.left; delete m.leftAt;
+    saveState(); render();
   });
 }
 /* 스터디원 순서 바꾸기 (질문 배정 순서의 기준이 된다) */
@@ -923,16 +947,17 @@ function renderLog(){
   });
 
   // 스터디원별 질문/답변 횟수
-  const ms=members().filter(m=>(m.name||"").trim());
   const cnt={};
   Object.values(bySubj).forEach(units=>Object.values(units).forEach(list=>list.forEach(e=>{
     if(!e.qoff)(cnt[e.q]||(cnt[e.q]={q:0,a:0})).q++;   // 불참 질문자만 질문 횟수 제외
     if(!e.aoff)(cnt[e.a]||(cnt[e.a]={q:0,a:0})).a++;   // 불참 답변자만 답변 횟수 제외
   })));
+  // 탈퇴한 사람은 기록이 있을 때만 보여준다
+  const ms=members().filter(m=>(m.name||"").trim()&&(!m.left||cnt[m.id]));
   document.getElementById("logNoMem").style.display=ms.length?"none":"block";
   document.getElementById("logStats").innerHTML=ms.map(m=>{
     const c=cnt[m.id]||{q:0,a:0};
-    return `<div class="stat"><div class="k">${esc(m.name)}</div>
+    return `<div class="stat"><div class="k">${esc(memberName(m.id))}</div>
       <div class="v">질문 ${c.q} · 답변 ${c.a}</div></div>`;
   }).join("");
 
@@ -1420,12 +1445,14 @@ function renderChapSection(){
 function renderAbsent(){
   const box=document.getElementById("mAbsent");
   if(!box)return;
-  const ms=members().filter(m=>(m.name||"").trim());
+  // 활동 중인 사람 + (탈퇴했더라도) 이 일정 배정에 이미 들어 있는 사람
+  const inQA=new Set((modalQA||[]).flatMap(x=>[x.q,x.a]));
+  const ms=members().filter(m=>(m.name||"").trim()&&(!m.left||inQA.has(m.id)));
   if(!modalQA||!modalQA.length||ms.length<2){ box.innerHTML=""; box.style.display="none"; return; }
   box.style.display="flex";
   box.innerHTML=`<span class="abslbl">불참</span>`+ms.map(m=>{
     const off=modalAbsent.includes(m.id);
-    return `<button type="button" class="abschip${off?' on':''}" data-id="${m.id}">${esc(m.name)}</button>`;
+    return `<button type="button" class="abschip${off?' on':''}" data-id="${m.id}">${esc(memberName(m.id))}</button>`;
   }).join("");
   box.querySelectorAll(".abschip").forEach(btn=>btn.onclick=()=>{
     const id=btn.dataset.id, i=modalAbsent.indexOf(id);
@@ -1455,7 +1482,7 @@ function renderQAMode(){
 }
 /* 질문 배정 안내문구 */
 function renderQANote(){
-  const n=members().filter(m=>(m.name||"").trim()).length;
+  const n=activeMembers().length;
   const note=document.getElementById("mQANote");
   if(!note)return;
   const has=!!(modalQA&&modalQA.length);
