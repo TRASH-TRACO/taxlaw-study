@@ -886,7 +886,7 @@ function keepFocus(fn){
     try{el.setSelectionRange(snap.s,snap.e);}catch(_){}
   }
 }
-function render(){keepFocus(()=>{renderStats();renderRounds();renderBlist();renderMembers();renderLog();renderHistory();renderChapterAdmin();renderCalendar();});}
+function render(){keepFocus(()=>{renderStats();renderRounds();renderBlist();renderMembers();renderLog();renderHistory();renderChapterAdmin();renderCalendar();refreshBig();});}
 
 function renderMembers(){
   const el=document.getElementById("memRows");
@@ -1547,7 +1547,7 @@ function bigCtxFromBlock(b){
   const multi=(b.parts||1)>1&&b.chapFrom;
   const from=multi?Math.min(b.chapFrom,total||1):1;
   const to=multi?Math.min(Math.max(b.chapTo||from,from),total||1):total;
-  return {subject:b.subject,round:b.round,parts:b.parts||1,part:b.part||1,
+  return {blockId:b.id,live:true,subject:b.subject,round:b.round,parts:b.parts||1,part:b.part||1,
     start:b.start,end:b.end,done:!!b.done,from,to,
     qa:Array.isArray(b.qa)?b.qa.map(x=>({...x})):[],
     absent:Array.isArray(b.absent)?b.absent.slice():[]};
@@ -1562,17 +1562,51 @@ function bigCtxFromModal(){
     start:document.getElementById("mStart").value,end:document.getElementById("mEnd").value,
     done:document.getElementById("mDone").checked,
     from:(parts>1)?chapSel.from:1, to:(parts>1)?chapSel.to:total,
-    qa:(modalQA||[]).map(x=>({...x})), absent:modalAbsent.slice()};
+    qa:(modalQA||[]).map(x=>({...x})), absent:modalAbsent.slice(),
+    blockId:editingId||null};   // 저장 안 된 새 일정이면 null → 새로고침 시 복원 안 됨
 }
-function openBig(ctx){
+function openBig(ctx,filter){
   if(!ctx||!ctx.subject)return;
-  bigCtx=ctx; bigFilter={id:"",role:"all"};
+  bigCtx=ctx; bigFilter=filter||{id:"",role:"all"};
   renderBig();
   document.getElementById("bigback").classList.add("on");
 }
 function closeBig(){
   document.getElementById("bigback").classList.remove("on");
   bigCtx=null;
+  saveBigHash();
+}
+/* ── 새로고침해도 크게 보기 유지 ──
+   열어 둔 일정·필터를 주소(#big=일정id&who=스터디원id&role=q)에 적어 두고, 페이지를 열 때 다시 연다.
+   replaceState라 뒤로가기 기록은 쌓이지 않는다. */
+function saveBigHash(){
+  let h="";
+  if(bigCtx&&bigCtx.blockId!=null){
+    const p=new URLSearchParams({big:String(bigCtx.blockId)});
+    if(bigFilter.id)p.set("who",bigFilter.id);
+    if(bigFilter.role&&bigFilter.role!=="all")p.set("role",bigFilter.role);
+    h="#"+p.toString();
+  }
+  if(location.hash!==h){
+    try{ history.replaceState(null,"",location.pathname+location.search+h); }catch(e){}
+  }
+}
+function restoreBigFromHash(){
+  const p=new URLSearchParams(location.hash.slice(1));
+  const id=p.get("big");
+  if(!id)return;
+  const b=state.blocks.find(x=>String(x.id)===id);
+  if(!b){ saveBigHash(); return; }   // 지워진 일정이면 주소만 정리
+  const role=["q","a"].includes(p.get("role"))?p.get("role"):"all";
+  openBig(bigCtxFromBlock(b),{id:p.get("who")||"",role});
+}
+/* 저장된 일정을 보고 있으면, 데이터가 바뀔 때(동기화·수정) 내용을 최신으로 다시 그린다 */
+function refreshBig(){
+  if(!bigCtx||!bigCtx.live)return;
+  const b=state.blocks.find(x=>x.id==bigCtx.blockId);
+  if(!b){ closeBig(); return; }
+  bigCtx=bigCtxFromBlock(b);
+  renderBig();
 }
 /* 이 배정이 지금 필터에 걸리는지 */
 function bigMatch(x){
@@ -1584,6 +1618,7 @@ function bigMatch(x){
 }
 function renderBig(){
   if(!bigCtx)return;
+  saveBigHash();
   const c=bigCtx;
   const total=effChapters(c.subject).length;
   const range=(c.from&&c.to)?(c.from===c.to?`Ch.${c.from}`:`Ch.${c.from}~${c.to}`):"";
@@ -1920,6 +1955,7 @@ if(!firebaseEnabled) document.getElementById("adminbar").style.display="none"; /
 setEdit(canEdit);   // 초기 잠금 상태 적용 (공유 모드=보기 전용, 로컬 모드=편집 가능)
 syncInputs();
 render();
+restoreBigFromHash();   // 새로고침 전에 크게 보기를 열어 뒀으면 다시 연다
 initFirebase();     // 공유 모드면 실시간 동기화 시작
 </script>
 </body>
